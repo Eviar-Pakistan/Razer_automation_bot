@@ -1,0 +1,4 @@
+./accounts.json
+./mfa_secrets.txt
+./bot.py
+./mfa.py
