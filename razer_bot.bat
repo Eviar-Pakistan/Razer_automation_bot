@@ -1,0 +1,6 @@
+@echo off
+echo Installing required Python modules...
+pip install -r requirements.txt
+echo Running Razer Bot...
+python main.py
+pause

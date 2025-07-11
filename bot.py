@@ -14,6 +14,35 @@ PASSWORD = "4EhURtksus0"
 MFA_FILE = "mfa_secrets.txt"
 
 
+# from datetime import datetime
+
+# user_voucher_files = {}
+
+# def save_voucher(email, product, code, serial, url=None):
+#     try:
+#         if email not in user_voucher_files:
+#             timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+#             safe_email = email.replace("@", "_at_").replace(".", "_")
+#             filename = f"vouchers_{safe_email}_{timestamp}.txt"
+#             user_voucher_files[email] = filename
+
+#             with open(filename, "w") as f:
+#                 f.write(f"Email: {email}\n")
+#                 if url:
+#                     f.write(f"URL: {url}\n")
+#                 f.write("\n") 
+
+#         filepath = user_voucher_files[email]
+
+#         with open(filepath, "a") as f:
+#             line = f"{product} | Code: {code} | Serial: {serial}"
+#             f.write(line + "\n")
+
+#         print(f"📄 Voucher saved to {filepath}")
+
+#     except Exception as e:
+#         print(f"❌ Error saving voucher: {e}")
+
 def log_to_textbox(text):
     if log_text_widget:
         log_text_widget.configure(state='normal')
