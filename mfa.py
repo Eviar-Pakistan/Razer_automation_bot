@@ -1,7 +1,7 @@
 import pyotp
 
 def start_live_mfa_display():
-    totp = pyotp.TOTP("LJ4TONLXHF3XOSDRNNSHIWKMJF4EOYSGMZSVOVRQNZDTA3RU")
+    totp = pyotp.TOTP("JB2FI52YGFBXI3CCGN3HQ52QO5GVSZJWJ52HIV2IK5IEETDR")
 
     def update_code():
         current_code = totp.now()

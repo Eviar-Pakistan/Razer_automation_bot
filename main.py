@@ -32,7 +32,8 @@ user_selector = None
 email_label = None
 password_label = None
 backup_codes = []
-
+global_gold = None
+global_silver = None
 
 def log_to_textbox(text):
     if log_text_widget:
@@ -86,6 +87,9 @@ def collectProducts(key):
     print("Collecting Products from the page....")
     time.sleep(2)
     results = []
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    safe_email = global_email.replace("@", "_at_").replace(".", "_")
+    filename = f"vouchers_{safe_email}_{timestamp}.txt"
     product_labels = page.query_selector_all(".selection-tile")
     page.click(".selection-tile-promos__details")
     for tile in product_labels:
@@ -110,7 +114,11 @@ def collectProducts(key):
         while True:
             try:
                 product_name, quantity = click_queue.get(timeout=0.5)
-                handle_product_click(product_name, quantity)
+                try:
+                    index = int(str(e).split("index")[1].strip())
+                except:
+                    index = 0
+                handle_product_click(product_name, quantity, retry=True, start_index=index, filename=filename)
             except queue.Empty:
                 continue
     wait_for_product_clicks()
@@ -235,25 +243,27 @@ def setup_inputs():
 
 from datetime import datetime
 
+written_products = set()
+
 def save_voucher(email, product, code, serial, filename, url=None):
+    global written_products
     try:
         with open(filename, "a") as f:
-            f.write(f"Email: {email}\n") if url else None
-            if url:
-                f.write(f"URL: {url}\n")
-            f.write(f"{product} | Code: {code} | Serial: {serial}\n\n")
+            if product not in written_products:
+                f.write(f"{product}\n")
+                written_products.add(product)
+            f.write(f"Code: {code} | Serial: {serial}\n")
 
         print(f"📄 Voucher saved to {filename}")
-
     except Exception as e:
-        print(f"❌ Error saving voucher: {e}")
+        print(f"❌ Failed to save voucher: {e}")
 
 
 
 import time
 
 
-def handle_product_click(product_name, quantity):
+def handle_product_click(product_name, quantity, retry=False, start_index=0, filename=None):
     global page, live_otp_code, global_email, global_link
     try:
         quantity = int(quantity)
@@ -262,32 +272,33 @@ def handle_product_click(product_name, quantity):
         page.click(f"text={product_name}")
         page.click(".selection-tile-promos__details")
 
-        # Create voucher file only once per click session
-        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        safe_email = global_email.replace("@", "_at_").replace(".", "_")
-        filename = f"vouchers_{safe_email}_{timestamp}.txt"
+        if not filename:
+            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            safe_email = global_email.replace("@", "_at_").replace(".", "_")
+            filename = f"vouchers_{safe_email}_{timestamp}.txt"
 
-        for i in range(quantity):
+
+        for i in range(start_index, quantity):
             print(f"\n➡️ Purchase {i + 1} of {quantity}")
 
-            button_locator = page.locator('[data-cs-override-id^="purchase-webshop-"][data-cs-override-id$="checkout-btn"]').first
-            button_locator.wait_for()
-            button_text = button_locator.text_content().strip()
-
-            if button_text == "RELOAD TO CHECKOUT":
-                print("❗ You have insufficient funds!")
-                return
-            elif button_text == "Checkout":
-                with page.expect_navigation():
-                    button_locator.click()
-            else:
-                print("❓ Unexpected button text!")
-                return
-
-            transaction_url = page.url
-
             try:
-                page.wait_for_selector(".pin-code", timeout=5000)
+                button_locator = page.locator('[data-cs-override-id^="purchase-webshop-"][data-cs-override-id$="checkout-btn"]').first
+                button_locator.wait_for()
+                button_text = button_locator.text_content().strip()
+
+                if button_text == "RELOAD TO CHECKOUT":
+                    print("❗ You have insufficient funds!")
+                    return
+                elif button_text == "Checkout":
+                    with page.expect_navigation():
+                        button_locator.click()
+                else:
+                    print("❓ Unexpected button text!")
+                    return
+
+                transaction_url = page.url
+
+                page.wait_for_selector(".pin-code", timeout=10000)
                 pin_code_text = page.locator(".pin-code").text_content().strip()
                 serial_number_text = page.locator(".pin-serial-number").text_content().strip()
 
@@ -300,11 +311,10 @@ def handle_product_click(product_name, quantity):
                 save_voucher(global_email, product_name, voucher_code, serial_number, filename=filename, url=transaction_url)
                 print(f"💾 Voucher saved: {voucher_code} | Serial: {serial_number}")
 
-            except Exception as e:
-                print(f"❌ Transaction not found or cancelled. Redirecting to main page... ({e})")
+            except Exception as e_inner:
+                print(f"❌ Transaction failed at item {i + 1}. Reason: {e_inner}")
                 page.goto(global_link)
-                continue  
-
+                raise Exception(f"Resuming needed from index {i}")
             if i < quantity - 1:
                 page.goto(global_link)
                 page.wait_for_selector(".selection-tile__text")
@@ -316,6 +326,12 @@ def handle_product_click(product_name, quantity):
     except Exception as e:
         print(f"❌ Error during product purchase: {e}")
         unlock_profile()
+        print("🔁 Retrying purchase after unlocking profile...")
+        try:
+            index = int(str(e).split("index")[1].strip())
+        except:
+            index = 0
+        handle_product_click(product_name, quantity, retry=True, start_index=index, filename=filename)
 
 
 
@@ -377,6 +393,7 @@ def unlock_profile():
                     return
                 for i, digit in enumerate(live_otp_code): final_inputs[i].fill(digit)
                 print("MFA code entered.")
+                time.sleep(2)
                 page.goto(global_link)
     except Exception as e:
         print(f"Failed to check existing MFA setup: {e}")
@@ -418,6 +435,9 @@ def setupAuthenticatorAndCollectProducts():
         print("Collecting Products from the page....")
         time.sleep(2)
         results = []
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        safe_email = global_email.replace("@", "_at_").replace(".", "_")
+        filename = f"vouchers_{safe_email}_{timestamp}.txt"
         product_labels = page.query_selector_all(".selection-tile")
         page.click(".selection-tile-promos__details")
         for tile in product_labels:
@@ -442,7 +462,11 @@ def setupAuthenticatorAndCollectProducts():
             while True:
                 try:
                     product_name, quantity = click_queue.get(timeout=0.5)
-                    handle_product_click(product_name, quantity)
+                    try:
+                        index = int(str(e).split("index")[1].strip())
+                    except:
+                        index = 0
+                    handle_product_click(product_name, quantity, retry=True, start_index=index, filename=filename)
                 except queue.Empty:
                     continue
         wait_for_product_clicks()
@@ -506,10 +530,10 @@ def automate():
     page.wait_for_url("**/dashboard")
     try:
         page.wait_for_selector("div.gold .info-balance")
-        gold = page.locator("div.gold .info-balance").text_content().strip()
-        silver = page.locator("div.silver .info-balance").text_content().strip()
-        gold_label.config(text=f"Gold: {gold}")
-        silver_label.config(text=f"Silver: {silver}")
+        global_gold = page.locator("div.gold .info-balance").text_content().strip()
+        global_silver = page.locator("div.silver .info-balance").text_content().strip()
+        gold_label.config(text=f"Gold: {global_gold}")
+        silver_label.config(text=f"Silver: {global_silver}")
     except Exception as e:
         print(f"Error retrieving balances: {e}")
     try:
