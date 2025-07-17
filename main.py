@@ -11,6 +11,7 @@ import queue
 import asyncio
 import subprocess
 import random
+import requests
 if not os.path.exists(os.path.expanduser("~/.ms-playwright")):
     print("Installing Playwright browsers...")
     subprocess.run(["playwright", "install"], shell=True)
@@ -34,6 +35,13 @@ password_label = None
 backup_codes = []
 global_gold = None
 global_silver = None
+
+def is_internet_available(timeout=5):
+    try:
+        requests.get("https://www.google.com", timeout=timeout)
+        return True
+    except requests.ConnectionError:
+        return False
 
 def log_to_textbox(text):
     if log_text_widget:
@@ -63,6 +71,9 @@ def load_credentials():
         return json.load(f)
 
 def deletePreviousAuthenticator():
+    if not is_internet_available():
+        print("⚠️ No internet connection. Please check your network.")
+        return    
     page.locator("button.btn.arrowed", has_text="Choose a different method").click()
     page.get_by_role("button", name="Backup Codes").click()
     code_to_use = random.choice(backup_codes)
@@ -82,6 +93,9 @@ def deletePreviousAuthenticator():
 
 def collectProducts(key):
     log_text_widget.after(0, lambda: start_live_mfa_display(key))
+    if not is_internet_available():
+        print("⚠️ No internet connection. Please check your network.")
+        return    
     page.goto(global_link)
     print(f"Navigating to: {global_link}")
     print("Collecting Products from the page....")
@@ -112,6 +126,9 @@ def collectProducts(key):
     log_text_widget.after(0, lambda: display_products(results))
     def wait_for_product_clicks():
         while True:
+            if not is_internet_available():
+                print("⚠️ No internet connection. Please check your network.")
+                return
             try:
                 product_name, quantity = click_queue.get(timeout=0.5)
                 try:
@@ -263,8 +280,14 @@ def save_voucher(email, product, code, serial, filename, url=None):
 import time
 
 
+from datetime import datetime
+import time
+
 def handle_product_click(product_name, quantity, retry=False, start_index=0, filename=None):
     global page, live_otp_code, global_email, global_link
+    if not is_internet_available():
+        print("⚠️ No internet connection. Please check your network.")
+        return      
     try:
         quantity = int(quantity)
         print(f"Selected product: {product_name} | Quantity: {quantity}")
@@ -282,6 +305,9 @@ def handle_product_click(product_name, quantity, retry=False, start_index=0, fil
             print(f"\n➡️ Purchase {i + 1} of {quantity}")
 
             try:
+                if not is_internet_available():
+                    print("⚠️ No internet connection. Please check your network.")
+                    return  
                 button_locator = page.locator('[data-cs-override-id^="purchase-webshop-"][data-cs-override-id$="checkout-btn"]').first
                 button_locator.wait_for()
                 button_text = button_locator.text_content().strip()
@@ -297,13 +323,45 @@ def handle_product_click(product_name, quantity, retry=False, start_index=0, fil
                     return
 
                 transaction_url = page.url
+                max_retries = 10
+                retry_delay = 2
 
-                page.wait_for_selector(".pin-code", timeout=10000)
-                pin_code_text = page.locator(".pin-code").text_content().strip()
-                serial_number_text = page.locator(".pin-serial-number").text_content().strip()
+                pin_code_text = ""
+                serial_number_text = ""
+
+    
+                for attempt in range(max_retries):
+
+                    try:
+                        if not is_internet_available():
+                            print("⚠️ No internet connection. Please check your network.")
+                            return  
+                        page.wait_for_selector(".pin-code", timeout=10000)
+                        pin_code_element = page.locator(".pin-code")
+                        serial_element = page.locator(".pin-serial-number")
+
+                        pin_code_text = pin_code_element.text_content().strip()
+                        serial_number_text = serial_element.text_content().strip()
+
+                        if pin_code_text and serial_number_text:
+                            break
+                        else:
+                            print(f"🔁 Retry {attempt + 1}/{max_retries} - Pin or Serial not found yet.")
+                            time.sleep(retry_delay)
+                    except Exception as wait_error:
+                        print(f"⚠️Waiting for strong connection: {wait_error}")
+                        page.goto(global_link)
+                        try:
+                            index = int(str(e).split("index")[1].strip())
+                        except:
+                            index = 0
+                        handle_product_click(product_name, quantity, retry=True, start_index=index, filename=filename)
+                        time.sleep(retry_delay)
 
                 if not pin_code_text or not serial_number_text:
                     raise Exception("Pin or Serial Number is empty")
+                
+        
 
                 voucher_code = pin_code_text
                 serial_number = serial_number_text.replace("S/N:", "").strip()
@@ -312,6 +370,9 @@ def handle_product_click(product_name, quantity, retry=False, start_index=0, fil
                 print(f"💾 Voucher saved: {voucher_code} | Serial: {serial_number}")
 
             except Exception as e_inner:
+                if not is_internet_available():
+                    print("⚠️ No internet connection. Please check your network.")
+                    return      
                 print(f"❌ Transaction failed at item {i + 1}. Reason: {e_inner}")
                 page.goto(global_link)
                 raise Exception(f"Resuming needed from index {i}")
@@ -325,13 +386,18 @@ def handle_product_click(product_name, quantity, retry=False, start_index=0, fil
 
     except Exception as e:
         print(f"❌ Error during product purchase: {e}")
+        if not is_internet_available():
+            print("⚠️ No internet connection. Please check your network.")
+            return          
         unlock_profile()
         print("🔁 Retrying purchase after unlocking profile...")
+        page.goto(global_link)
         try:
             index = int(str(e).split("index")[1].strip())
         except:
             index = 0
         handle_product_click(product_name, quantity, retry=True, start_index=index, filename=filename)
+
 
 
 
@@ -378,32 +444,61 @@ def display_products(results):
 
 
 def unlock_profile():
-    page.goto("https://razerid.razer.com/account/security/setup")
     try:
-        description = page.text_content(".modal-description.mb-15.text-gray").strip().lower()
+        page.goto("https://razerid.razer.com/account/security/setup")
+        page.wait_for_load_state("networkidle")
+
+        try:
+            status_element = page.query_selector("span.info.align-left.text-ellipsis.text-green")
+            if status_element:
+                status_text = status_element.inner_text().strip()
+                if "Enabled" in status_text:
+                    print("✅ MFA is enabled. Redirecting...")
+                    page.goto(global_link)
+                    return
+        except Exception as status_err:
+            print(f"⚠️ Unable to detect MFA status text: {status_err}")
+
+        try:
+            description = page.text_content(".modal-description.mb-15.text-gray").strip().lower()
+        except:
+            description = ""
+
         if "enter the code generated by your authenticator" in description:
-            print("MFA is already set up.")
+            print("🔐 MFA prompt detected.")
             key = get_last_secret_key()
             start_live_mfa_display(key)
+
             if key:
-                page.wait_for_selector(".input-group-otp input")
-                final_inputs = page.query_selector_all(".input-group-otp input")
-                if len(final_inputs) != 6:
-                    print("Final OTP fields missing.")
+                try:
+                    page.wait_for_selector(".input-group-otp input", timeout=5000)
+                    final_inputs = page.query_selector_all(".input-group-otp input")
+                    if len(final_inputs) != 6:
+                        print("⚠️ Final OTP input fields missing.")
+                        return
+
+                    for i, digit in enumerate(live_otp_code):
+                        final_inputs[i].fill(digit)
+
+                    print("✅ MFA code entered.")
+                    time.sleep(2)
+                    page.goto(global_link)
                     return
-                for i, digit in enumerate(live_otp_code): final_inputs[i].fill(digit)
-                print("MFA code entered.")
-                time.sleep(2)
-                page.goto(global_link)
+                except Exception as otp_err:
+                    print(f"⚠️ Error filling OTP: {otp_err}")
+        
+        print("⚠️ MFA status unknown. Redirecting to main link.")
+        page.goto(global_link)
+
     except Exception as e:
-        print(f"Failed to check existing MFA setup: {e}")
+        print(f"❌ Failed to unlock profile or check MFA status: {e}")
 
 
-# def run_unlock_profile_periodically():
-#     unlock_profile()
-#     threading.Timer(120, run_unlock_profile_periodically).start()
 
 def setupAuthenticatorAndCollectProducts():
+    if not is_internet_available():
+        print("⚠️ No internet connection. Please check your network.")
+        return    
     print("Selecting Authenticator App...")
     page.wait_for_selector(".tfa-item")
     page.click(".tfa-item")
@@ -426,6 +521,9 @@ def setupAuthenticatorAndCollectProducts():
     page.click("#btn-next")
     print("Clicked final 'Next'")
     try:
+        if not is_internet_available():
+            print("⚠️ No internet connection. Please check your network.")
+            return        
         page.wait_for_selector("#btn-finish")
         page.click("#btn-finish")
         print("MFA Setup Completed!")
@@ -474,6 +572,16 @@ def setupAuthenticatorAndCollectProducts():
         print("Finish button not found or already clicked.")
     print("\nLive MFA Codes (refreshing every 30 seconds):") 
 
+def stop_bot():
+    print("🛑 Stopping bot and closing application...")
+    try:
+        page.context.browser.close()
+    except:
+        pass
+    # sys.exit()
+
+
+
 def start_main_ui():
     global log_text_widget, input_frame, gold_label, silver_label, product_display_frame,code_label
 
@@ -493,6 +601,7 @@ def start_main_ui():
     btn_frame.pack(pady=5)
     tk.Button(btn_frame, text="Setup", command=setup_inputs, width=20).pack(side=tk.LEFT, padx=10)
     tk.Button(btn_frame, text="Run Scan", command=lambda: threading.Thread(target=automate, daemon=True).start(), width=20).pack(side=tk.RIGHT, padx=10)
+    tk.Button(btn_frame, text="Stop Razer Bot", command=stop_bot, width=20, fg="red").pack(side=tk.LEFT, padx=10)
     balance_frame = tk.Frame(root)
     balance_frame.pack(pady=5)
     gold_label = tk.Label(balance_frame, text="Gold: --", font=("Helvetica", 12), fg="#f1c40f")
@@ -506,6 +615,11 @@ def start_main_ui():
 
 def automate():
     global global_email, global_password, global_link, page
+
+    if not is_internet_available():
+        print("⚠️ No internet connection. Please check your network.")
+        return
+
     credentials = load_credentials()
     if not global_email or not global_password:
         if credentials:
@@ -521,6 +635,9 @@ def automate():
     browser = playwright.chromium.launch(headless=False)
     page = browser.new_page()
     print("Launching browser...")
+    if not is_internet_available():
+        print("⚠️ No internet connection. Please check your network.")
+        return
     page.goto("https://razerid.razer.com/")
     page.fill("#input-login-email", global_email)
     page.fill("#input-login-password", global_password)
@@ -529,6 +646,9 @@ def automate():
     print("Login successful.")
     page.wait_for_url("**/dashboard")
     try:
+        if not is_internet_available():
+            print("⚠️ No internet connection. Please check your network.")
+            return
         page.wait_for_selector("div.gold .info-balance")
         global_gold = page.locator("div.gold .info-balance").text_content().strip()
         global_silver = page.locator("div.silver .info-balance").text_content().strip()
@@ -540,8 +660,14 @@ def automate():
         page.click(".cky-btn.cky-btn-accept")
     except:
         pass
+    if not is_internet_available():
+        print("⚠️ No internet connection. Please check your network.")
+        return    
     page.goto("https://razerid.razer.com/account/security/setup")
     try:
+        if not is_internet_available():
+            print("⚠️ No internet connection. Please check your network.")
+            return        
         description = page.text_content(".modal-description.mb-15.text-gray").strip().lower()
         if "enter the code generated by your authenticator" in description:
             print("MFA is already set up.")
@@ -560,6 +686,9 @@ def automate():
             
                 
         else:
+            if not is_internet_available():
+                print("⚠️ No internet connection. Please check your network.")
+                return            
             print("Waiting for OTP modal...")
             page.wait_for_selector(".input-group-otp input")
             print("OTP modal detected!")
