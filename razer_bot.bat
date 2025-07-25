@@ -1,6 +1,9 @@
 @echo off
+echo Checking and upgrading pip...
+python -m pip install --upgrade pip
 echo Installing required Python modules...
 pip install -r requirements.txt
 echo Running Razer Bot...
 python main.py
+
 pause

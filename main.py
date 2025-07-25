@@ -644,6 +644,10 @@ def automate():
     page.click("#btn-log-in")
     print("Submitted login form.")
     print("Login successful.")
+    try:
+        page.click(".cky-btn.cky-btn-accept")
+    except:
+        pass
     page.wait_for_url("**/dashboard")
     try:
         if not is_internet_available():
@@ -656,10 +660,7 @@ def automate():
         silver_label.config(text=f"Silver: {global_silver}")
     except Exception as e:
         print(f"Error retrieving balances: {e}")
-    try:
-        page.click(".cky-btn.cky-btn-accept")
-    except:
-        pass
+
     if not is_internet_available():
         print("⚠️ No internet connection. Please check your network.")
         return    
