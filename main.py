@@ -169,6 +169,43 @@ def get_last_secret_key(email=None):
         print(f"Error reading MFA file for {email}: {e}")
         return None
 
+def archive_mfa(email):
+    if not os.path.exists(MFA_FILE):
+        return
+    try:
+        with open(MFA_FILE, "r") as f:
+            lines = f.readlines()
+        user_lines = [line for line in lines if line.startswith(f"{email}:")]
+        if not user_lines:
+            return
+
+        archive_file = f"{email.replace('@', '_at_').replace('.', '_')}_mfa_backup.txt"
+        with open(archive_file, "w") as f:
+            f.writelines(user_lines)
+        print(f"✅ MFA secrets archived to {archive_file}")
+
+        lines = [line for line in lines if not line.startswith(f"{email}:")]
+        with open(MFA_FILE, "w") as f:
+            f.writelines(lines)
+
+    except Exception as e:
+        print(f"❌ Error archiving MFA: {e}")
+
+def archive_vouchers(email):
+    try:
+        matching_files = [f for f in os.listdir(".") if f.startswith(f"vouchers_{email.replace('@', '_at_').replace('.', '_')}")]
+        if not matching_files:
+            return
+        archive_folder = "archived_vouchers"
+        os.makedirs(archive_folder, exist_ok=True)
+
+        for f in matching_files:
+            new_path = os.path.join(archive_folder, f)
+            os.rename(f, new_path)
+            print(f"📦 Voucher file archived: {f} -> {new_path}")
+    except Exception as e:
+        print(f"❌ Error archiving vouchers: {e}")
+
 
 def save_secret_key(email, secret_key):
     with open(MFA_FILE, "a") as f:
@@ -184,6 +221,7 @@ def start_live_mfa_display(secret_key):
         code_label.config(text=f"Code: {current_code} | Expires in: {seconds_remaining}s")
         code_label.after(1000, update_code)
     update_code()
+    
 
 def setup_inputs():
     global entry_link, entry_email, entry_password, user_selector, email_label, password_label
@@ -228,6 +266,8 @@ def setup_inputs():
     entry_backup = tk.Entry(input_frame, width=50)
     entry_backup.pack()
 
+
+
     def on_submit():
         global global_email, global_password, global_link , backup_codes
         global_link = entry_link.get().strip()
@@ -253,8 +293,35 @@ def setup_inputs():
 
         input_frame.pack_forget()
         messagebox.showinfo("Success", "Setup completed. You can now Run Scan.")
+    
+    def remove_user():
+        selected = user_selector.get()
+        if selected == "Add New User":
+            messagebox.showinfo("Info", "Select an existing user to remove.")
+            return
 
+        confirm = messagebox.askyesno("Confirm", f"Are you sure you want to remove user: {selected}?")
+        if not confirm:
+            return
+
+        credentials = load_credentials()
+        if selected not in credentials:
+            messagebox.showerror("Error", "User not found in credentials.")
+            return
+
+        archive_mfa(selected)
+        archive_vouchers(selected)
+
+        del credentials[selected]
+        with open(CONFIG_FILE, "w") as f:
+            json.dump(credentials, f, indent=2)
+
+        messagebox.showinfo("Removed", f"User {selected} removed and data archived.")
+        setup_inputs() 
+    
+    
     tk.Button(input_frame, text="Save & Continue", command=on_submit).pack(pady=5)
+    tk.Button(input_frame, text="Remove Selected User", command=remove_user, fg="red").pack(pady=3)
 
 
 
@@ -356,8 +423,7 @@ def handle_product_click(product_name, quantity, retry=False, start_index=0, fil
                         except:
                             index = 0
                         handle_product_click(product_name, quantity, retry=True, start_index=index, filename=filename)
-                        time.sleep(retry_delay)
-
+        
                 if not pin_code_text or not serial_number_text:
                     raise Exception("Pin or Serial Number is empty")
                 
@@ -444,54 +510,32 @@ def display_products(results):
 
 
 def unlock_profile():
+    page.goto("https://razerid.razer.com/account/security/setup")
     try:
-        page.goto("https://razerid.razer.com/account/security/setup")
-        page.wait_for_load_state("networkidle")
-
-        try:
-            status_element = page.query_selector("span.info.align-left.text-ellipsis.text-green")
-            if status_element:
-                status_text = status_element.inner_text().strip()
-                if "Enabled" in status_text:
-                    print("✅ MFA is enabled. Redirecting...")
-                    page.goto(global_link)
-                    return
-        except Exception as status_err:
-            print(f"⚠️ Unable to detect MFA status text: {status_err}")
-
-        try:
-            description = page.text_content(".modal-description.mb-15.text-gray").strip().lower()
-        except:
-            description = ""
-
+        page.wait_for_selector('a.tfa-item[href="/account/security/codes"]')
+        page.click('a.tfa-item[href="/account/security/codes"]')
+        description = page.text_content(".modal-description.mb-15.text-gray").strip().lower()
         if "enter the code generated by your authenticator" in description:
-            print("🔐 MFA prompt detected.")
+            print("MFA is already set up.")
             key = get_last_secret_key()
             start_live_mfa_display(key)
-
             if key:
-                try:
-                    page.wait_for_selector(".input-group-otp input", timeout=5000)
-                    final_inputs = page.query_selector_all(".input-group-otp input")
-                    if len(final_inputs) != 6:
-                        print("⚠️ Final OTP input fields missing.")
-                        return
-
-                    for i, digit in enumerate(live_otp_code):
-                        final_inputs[i].fill(digit)
-
-                    print("✅ MFA code entered.")
-                    time.sleep(2)
-                    page.goto(global_link)
+                page.wait_for_selector(".input-group-otp input")
+                final_inputs = page.query_selector_all(".input-group-otp input")
+                if len(final_inputs) != 6:
+                    print("Final OTP fields missing.")
                     return
-                except Exception as otp_err:
-                    print(f"⚠️ Error filling OTP: {otp_err}")
-        
-        print("⚠️ MFA status unknown. Redirecting to main link.")
-        page.goto(global_link)
+                for i, digit in enumerate(live_otp_code):
+                    final_inputs[i].fill(digit)
+                print("✅ MFA code entered.")
+                time.sleep(2)
+                page.goto(global_link)
+
 
     except Exception as e:
-        print(f"❌ Failed to unlock profile or check MFA status: {e}")
+        print(f"⚠️ Failed to unlock or check MFA: {e}")
+
+
 
 
 
@@ -625,6 +669,7 @@ def automate():
         if credentials:
             global_email, global_password = next(iter(credentials.items()))
             print(f"Using saved credentials for {global_email}")
+            print(global_password)
         else:
             print("No credentials found. Please run setup first.")
             return
@@ -639,15 +684,16 @@ def automate():
         print("⚠️ No internet connection. Please check your network.")
         return
     page.goto("https://razerid.razer.com/")
-    page.fill("#input-login-email", global_email)
-    page.fill("#input-login-password", global_password)
-    page.click("#btn-log-in")
-    print("Submitted login form.")
-    print("Login successful.")
     try:
         page.click(".cky-btn.cky-btn-accept")
     except:
         pass
+    page.fill("#input-login-email", global_email)
+    page.focus("#input-login-password")
+    page.fill("#input-login-password", global_password)
+    page.click("#btn-log-in")
+    print("Submitted login form.")
+    print("Login successful.")
     page.wait_for_url("**/dashboard")
     try:
         if not is_internet_available():
