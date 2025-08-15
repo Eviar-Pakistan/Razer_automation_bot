@@ -99,7 +99,11 @@ def collectProducts(key):
     page.goto(global_link)
     print(f"Navigating to: {global_link}")
     print("Collecting Products from the page....")
-    time.sleep(2)
+    try:
+        page.click(".cky-btn.cky-btn-accept")
+    except:
+        pass
+    time.sleep(5)
     results = []
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     safe_email = global_email.replace("@", "_at_").replace(".", "_")
@@ -684,10 +688,10 @@ def automate():
         print("⚠️ No internet connection. Please check your network.")
         return
     page.goto("https://razerid.razer.com/")
-    try:
-        page.click(".cky-btn.cky-btn-accept")
-    except:
-        pass
+    # try:
+    #     page.click(".cky-btn.cky-btn-accept")
+    # except:
+    #     pass
     page.fill("#input-login-email", global_email)
     page.focus("#input-login-password")
     page.fill("#input-login-password", global_password)
